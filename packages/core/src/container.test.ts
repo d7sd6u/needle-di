@@ -37,6 +37,45 @@ describe("Container API", () => {
     expect(container.get(token)).toBeInstanceOf(MyService);
   });
 
+  it("wildcardBind", () => {
+    const container = new Container();
+    class RegularBind {}
+
+    class WildcardBind {}
+    class OtherWildcardBind {}
+    class OverrideClass {
+      field = 123;
+    }
+
+    @injectable()
+    class DecoratedClass {}
+
+    container.bind(RegularBind);
+    container.wildcardBind({ providerFactory: (token) => [{ provide: token, useClass: OverrideClass }] });
+
+    expect(container.get(WildcardBind), "overrides class with plain string value").toEqual({ field: 123 });
+    expect(container.get(RegularBind), "does not affect regular bind").toBeInstanceOf(RegularBind);
+    expect(container.get(DecoratedClass), "does not affect @injectable bind").toBeInstanceOf(DecoratedClass);
+    expect(container.get(WildcardBind), "stores providers and thus keeps singleton identities").toBe(
+      container.get(WildcardBind),
+    );
+    expect(container.get(OtherWildcardBind), "overrides different classes").toEqual({ field: 123 });
+    expect(
+      container.get(OtherWildcardBind),
+      "just like regular providers different tokens yield different values",
+    ).not.toBe(container.get(WildcardBind));
+
+    const childContainer = container.createChild();
+
+    childContainer.bind({ provide: WildcardBind, useValue: "child WildcardBind" });
+    expect(container.get(WildcardBind), "child regular binds do not affect parent").toEqual({ field: 123 });
+    expect(childContainer.get(WildcardBind), "child regular binds shadow parent").toBe("child WildcardBind");
+    expect(childContainer.get(OtherWildcardBind), "non shadowed tokens are not affected").toEqual({ field: 123 });
+
+    container.unbindAll();
+    expect(() => container.get(WildcardBind), "unbindAll removes wildcard provider").toThrow();
+  });
+
   it("injectAsync", async () => {
     await expect(injectAsync(MyService)).rejects.toThrowError(
       "You can only invoke inject() or injectAsync() within an injection context",

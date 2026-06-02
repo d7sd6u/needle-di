@@ -1,6 +1,6 @@
 import { type Token, isClassToken, toString, isInjectionToken, getToken } from "./tokens.ts";
 import * as Guards from "./providers.ts";
-import type { Provider } from "./providers.ts";
+import type { Provider, WildcardProvider } from "./providers.ts";
 import { getInjectableTargets, isInjectable } from "./decorators.ts";
 import { assertPresent, assertSingle, getParentClasses, promiseTry, windowedSlice } from "./utils.ts";
 import { Factory } from "./factory.ts";
@@ -11,7 +11,7 @@ import { injectionContext } from "./context.ts";
  * and hold the actual instances of your services.
  */
 export class Container {
-  private readonly providers: ProviderMap = new Map();
+  private readonly providers: ProviderMap = new ProviderMap();
   private readonly singletons: SingletonMap = new Map();
 
   private readonly parent?: Container;
@@ -24,6 +24,16 @@ export class Container {
       provide: Container,
       useValue: this,
     });
+  }
+
+  /**
+   * Adds wildcard binder to create providers dynamically.
+   *
+   * {@link https://needle-di.io/concepts/binding.html#wildcard-binding}
+   */
+  public wildcardBind(p: WildcardProvider<unknown>): this {
+    this.providers.addWildcard(p);
+    return this;
   }
 
   /**
@@ -129,7 +139,7 @@ export class Container {
       return this;
     }
 
-    const providers = this.providers.get(token) ?? [];
+    const providers = this.providers.getExisting(token) ?? [];
 
     // validating multi-provider inconsistencies...
     const multi = Guards.isMultiProvider(provider);
@@ -373,7 +383,7 @@ export class Container {
       const targetClasses = getInjectableTargets(token);
 
       targetClasses
-        .filter((targetClass) => !this.providers.has(targetClass))
+        .filter((targetClass) => !this.providers.hasExisting(targetClass))
         .forEach((targetClass) => {
           this.bind({
             provide: targetClass,
@@ -406,10 +416,56 @@ export class Container {
   }
 }
 
-interface ProviderMap extends Map<Token<unknown>, Provider<unknown>[]> {
-  get<T>(key: Token<T>): Provider<T>[] | undefined;
+class ProviderMap extends Map<Token<unknown>, Provider<unknown>[]> {
+  /**
+   * Retrieve a regular provider, not an auto created with a wildcard bind
+   *
+   * Useful for binding (thus mutating internal state) actions like `Container.autoBindIfIfNeeded` and `Container.bind`
+   */
+  getExisting<T>(key: Token<T>): Provider<T>[] | undefined {
+    return super.get(key) as Provider<T>[] | undefined;
+  }
+  override get<T>(key: Token<T>): Provider<T>[] | undefined {
+    const existingProvider = super.get(key) as Provider<T>[] | undefined;
+    if (existingProvider) return existingProvider;
+    for (const wildcardProvider of this.wildcards) {
+      const result = wildcardProvider.providerFactory(key);
+      if (result) return result as Provider<T>[];
+    }
+    return undefined;
+  }
+  override has<T>(value: Token<T>): boolean {
+    return super.has(value) || [...this.wildcards].some((wildcard) => !!wildcard.providerFactory(value));
+  }
+  /**
+   * Check if provider map has regular provider, not auto created with a wildcard bind
+   *
+   * Useful for binding (thus internal state mutating) actions like `Container.autoBindIfIfNeeded` and `Container.bind`
+   */
+  hasExisting<T>(value: Token<T>): boolean {
+    return super.has(value);
+  }
 
-  set<T>(key: Token<T>, value: Provider<T>[]): this;
+  override set<T>(key: Token<T>, value: Provider<T>[]): this {
+    super.set(key, value);
+    return this;
+  }
+
+  override clear() {
+    super.clear();
+    this.wildcards.clear();
+  }
+
+  wildcards = new Set<WildcardProvider<unknown>>();
+
+  addWildcard(wildcard: WildcardProvider<unknown>) {
+    this.wildcards.add(wildcard);
+  }
+
+  override delete(key: Token<unknown> | WildcardProvider<unknown>): boolean {
+    if (typeof key === "object" && "providerFactory" in key) return this.wildcards.delete(key);
+    return super.delete(key);
+  }
 }
 
 interface SingletonMap extends Map<Token<unknown>, unknown[]> {

@@ -8,6 +8,18 @@ import type { Container } from "./container.ts";
 export type Provider<T> = SyncProvider<T> | AsyncProvider<T>;
 
 /**
+ * A meta-provider that creates providers based on the unbind token.
+ * 
+ * Is always checked after regular binds were exhausted. 
+ * 
+ * Return `undefined` to ignore the token.
+ */
+export interface WildcardProvider<T> {
+  providerFactory: (token: Token<T>) => Provider<T>[] | undefined;
+}
+
+
+/**
  * A provider that provides synchronously, allowing a non-blocking process.
  */
 export type SyncProvider<T> =

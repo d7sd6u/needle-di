@@ -75,7 +75,37 @@ This is the same as applying a decorator to `FooService`.
 To clear a binding, you can use the `.unbind()` or `.unbindAll()` method. This will also remove any instances of the
 service from the container.
 
-***
+## Wildcard binding
+
+Sometimes it is useful to generate _providers_ dynamically on the fly. For example, it can be used with universal mocks like [`ts-mockito`](https://github.com/johanblumenberg/ts-mockito).
+
+```ts
+import { imock } from "@johanblumenberg/ts-mockito";
+import { FooService } from "./foo.service";
+import { FooRepository } from "./foo.repository";
+
+const container = new Container();
+const mocks = new WeakMap();
+
+container.wildcardBind({
+  providerFactory: (token) => {
+    const mock = imock(MockPropertyPolicy.Throw);
+    mocks.set(token, mock);
+    return [{ provide: token, useValue: instance(mock) }];
+  },
+});
+
+const instance = container.get(FooService);
+
+const repository = mocks.get(FooRepository)!;
+
+when(repository.findOne("testid")).thenReturn({ data: "sample value" });
+```
+
+Wildcard binds are tested after regular binds in the order they were registered.
+It is possible to ignore token by returing `undefined` from the providerFactory.
+
+---
 
 There are many different ways to bind services,
 check out the section about [providers](./providers) to learn more. 
